@@ -72,7 +72,7 @@ def load_model():
         print(f"⚠ Directorio '{MODEL_DIR}' no encontrado. Ejecuta model.py primero.")
         return
 
-    model    = keras.models.load_model(f"{MODEL_DIR}/model.keras")
+    model    = keras.models.load_model(f"{MODEL_DIR}/model.h5")
     encoders = joblib.load(f"{MODEL_DIR}/encoders.pkl")
     scaler   = joblib.load(f"{MODEL_DIR}/scaler.pkl")
 

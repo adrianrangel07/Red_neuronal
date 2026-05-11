@@ -3,6 +3,8 @@ Workwise - Red Neuronal de Predicción de Aceptación Laboral
 Modelo: Clasificación binaria (Aceptado / No Aceptado)
 """
 
+from pyexpat import model
+
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -235,6 +237,9 @@ def train():
         )
     ]
 
+    print("Pesos totales ANTES:", model.count_params())
+    print("Cantidad de arrays de pesos ANTES:", len(model.get_weights()))
+
     # 6. Entrenar
     print("\n▶ Entrenando...\n")
     history = model.fit(
@@ -245,7 +250,9 @@ def train():
         callbacks=callbacks,
         verbose=1
     )
-
+    print("Pesos totales DESPUÉS:", model.count_params())
+    print("Cantidad de arrays de pesos DESPUÉS:", len(model.get_weights()))
+    print("Shape primer peso DESPUÉS:", model.get_weights()[0].shape)
     # 7. Evaluar
     print("\n── Evaluación en Test ──────────────────────")
     y_pred_prob = model.predict(X_test).flatten()
@@ -259,7 +266,7 @@ def train():
 
     # 8. Guardar
     os.makedirs(MODEL_DIR, exist_ok=True)
-    model.save(f"{MODEL_DIR}/model.keras")
+    model.save(f"{MODEL_DIR}/model.h5", include_optimizer=False)
     preprocessor.save(MODEL_DIR)
 
     # Guardar metadatos
