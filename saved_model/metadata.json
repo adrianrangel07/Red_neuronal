@@ -1,0 +1,78 @@
+{
+  "input_features": [
+    "tipo_empleo",
+    "modalidad",
+    "tipo_contrato",
+    "nivel_estudio",
+    "sector",
+    "experiencia"
+  ],
+  "output": "aceptado (0 = No, 1 = Sí)",
+  "threshold": 0.5,
+  "accuracy_test": 0.8544,
+  "categoricals": {
+    "tipo_empleo": [
+      "Tiempo_Completo",
+      "Medio_Tiempo",
+      "Por_Horas",
+      "Freelance"
+    ],
+    "modalidad": [
+      "Presencial",
+      "Remoto",
+      "Hibrido"
+    ],
+    "tipo_contrato": [
+      "Indefinido",
+      "Practicas",
+      "Obra_Labor",
+      "Fijo"
+    ],
+    "nivel_estudio": [
+      "Sin_estudios",
+      "Bachiller",
+      "Tecnico_Tecnologo",
+      "Tecnologo_Universitario",
+      "Universitario",
+      "Master",
+      "Doctorado"
+    ],
+    "sector": [
+      "Aeroespacial",
+      "Agricultura",
+      "Agroindustria",
+      "Ambiental",
+      "ArtesCreativas",
+      "Automotriz",
+      "BienesRaices",
+      "Biotecnologia",
+      "Comercio",
+      "Construccion",
+      "Consultoria",
+      "Deportes",
+      "Diseno",
+      "Educacion",
+      "Energia",
+      "Finanzas",
+      "Gobierno",
+      "Investigacion",
+      "Legal",
+      "Logistica",
+      "Manufactura",
+      "Marketing",
+      "Medios",
+      "Mineria",
+      "Naval",
+      "Quimica",
+      "RRHH",
+      "Salud",
+      "Seguros",
+      "Servicios",
+      "Social",
+      "Tecnologia",
+      "Textil",
+      "Transporte",
+      "Turismo"
+    ]
+  }
+}
