@@ -9,7 +9,7 @@
   ],
   "output": "aceptado (0 = No, 1 = Sí)",
   "threshold": 0.5,
-  "accuracy_test": 0.8575,
+  "accuracy_test": 0.8544,
   "categoricals": {
     "tipo_empleo": [
       "Tiempo_Completo",
