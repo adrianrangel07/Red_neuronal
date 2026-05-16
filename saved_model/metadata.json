@@ -1,78 +1,34 @@
 {
+  "version": "2.0",
   "input_features": [
-    "tipo_empleo",
-    "modalidad",
-    "tipo_contrato",
-    "nivel_estudio",
-    "sector",
-    "experiencia"
+    "experiencia_candidato",
+    "cumple_experiencia",
+    "brecha_experiencia",
+    "nivel_candidato",
+    "cumple_nivel",
+    "match_habilidades",
+    "match_categoria"
   ],
-  "output": "aceptado (0 = No, 1 = Sí)",
+  "output": "aceptado (0 = No, 1 = Si)",
   "threshold": 0.5,
-  "accuracy_test": 0.8544,
-  "categoricals": {
-    "tipo_empleo": [
-      "Tiempo_Completo",
-      "Medio_Tiempo",
-      "Por_Horas",
-      "Freelance"
-    ],
-    "modalidad": [
-      "Presencial",
-      "Remoto",
-      "Hibrido"
-    ],
-    "tipo_contrato": [
-      "Indefinido",
-      "Practicas",
-      "Obra_Labor",
-      "Fijo"
-    ],
-    "nivel_estudio": [
-      "Sin_estudios",
-      "Bachiller",
-      "Tecnico_Tecnologo",
-      "Tecnologo_Universitario",
-      "Universitario",
-      "Master",
-      "Doctorado"
-    ],
-    "sector": [
-      "Aeroespacial",
-      "Agricultura",
-      "Agroindustria",
-      "Ambiental",
-      "ArtesCreativas",
-      "Automotriz",
-      "BienesRaices",
-      "Biotecnologia",
-      "Comercio",
-      "Construccion",
-      "Consultoria",
-      "Deportes",
-      "Diseno",
-      "Educacion",
-      "Energia",
-      "Finanzas",
-      "Gobierno",
-      "Investigacion",
-      "Legal",
-      "Logistica",
-      "Manufactura",
-      "Marketing",
-      "Medios",
-      "Mineria",
-      "Naval",
-      "Quimica",
-      "RRHH",
-      "Salud",
-      "Seguros",
-      "Servicios",
-      "Social",
-      "Tecnologia",
-      "Textil",
-      "Transporte",
-      "Turismo"
-    ]
-  }
+  "accuracy_test": 0.9425,
+  "nivel_estudio_map": {
+    "Sin_estudios": 0,
+    "Bachiller": 1,
+    "Tecnico_Tecnologo": 2,
+    "Tecnologo_Universitario": 3,
+    "Universitario": 4,
+    "Master": 5,
+    "Doctorado": 6
+  },
+  "categorias": [
+    "Ingenieria",
+    "Desarrollo",
+    "Salud",
+    "Administracion",
+    "Diseno",
+    "Otros",
+    "Tecnologia",
+    "Construccion"
+  ]
 }

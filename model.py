@@ -1,16 +1,22 @@
 """
-Workwise - Red Neuronal de Predicción de Aceptación Laboral
+Workwise - Red Neuronal de Predicción de Aceptación Laboral v2
 Modelo: Clasificación binaria (Aceptado / No Aceptado)
-"""
 
-from pyexpat import model
+Variables de entrada (7):
+  1. experiencia_candidato     → años que ingresa el usuario
+  2. cumple_experiencia        → 1 si experiencia_candidato >= experiencia_oferta
+  3. brecha_experiencia        → experiencia_candidato - experiencia_oferta (puede ser negativa)
+  4. nivel_estudio_candidato   → nivel que selecciona el usuario (codificado)
+  5. cumple_nivel              → 1 si nivel_candidato >= nivel_oferta
+  6. match_habilidades         → % de habilidades de la oferta que tiene el candidato (0.0-1.0)
+  7. match_categoria           → 1 si la categoría del candidato coincide con la de la oferta
+"""
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 import joblib
@@ -19,24 +25,22 @@ import os
 
 # ─── Constantes ────────────────────────────────────────────────────────────────
 
-TIPO_EMPLEO = ["Tiempo_Completo", "Medio_Tiempo", "Por_Horas", "Freelance"]
-
-MODALIDAD = ["Presencial", "Remoto", "Hibrido"]
-
-TIPO_CONTRATO = ["Indefinido", "Practicas", "Obra_Labor", "Fijo"]
-
 NIVEL_ESTUDIO = [
-    "Sin_estudios", "Bachiller", "Tecnico_Tecnologo",
-    "Tecnologo_Universitario", "Universitario", "Master", "Doctorado"
+    "Sin_estudios",           # 0 — menor nivel
+    "Bachiller",              # 1
+    "Tecnico_Tecnologo",      # 2
+    "Tecnologo_Universitario",# 3
+    "Universitario",          # 4
+    "Master",                 # 5
+    "Doctorado"               # 6 — mayor nivel
 ]
 
-SECTOR = [
-    "Aeroespacial", "Agricultura", "Agroindustria", "Ambiental", "ArtesCreativas",
-    "Automotriz", "BienesRaices", "Biotecnologia", "Comercio", "Construccion",
-    "Consultoria", "Deportes", "Diseno", "Educacion", "Energia", "Finanzas",
-    "Gobierno", "Investigacion", "Legal", "Logistica", "Manufactura", "Marketing",
-    "Medios", "Mineria", "Naval", "Quimica", "RRHH", "Salud", "Seguros",
-    "Servicios", "Social", "Tecnologia", "Textil", "Transporte", "Turismo"
+# Mapa numérico para comparar niveles
+NIVEL_PESO = {n: i for i, n in enumerate(NIVEL_ESTUDIO)}
+
+CATEGORIAS = [
+    "Ingenieria", "Desarrollo", "Salud", "Administracion",
+    "Diseno", "Otros", "Tecnologia", "Construccion"
 ]
 
 MODEL_DIR = "saved_model"
@@ -44,126 +48,126 @@ MODEL_DIR = "saved_model"
 
 # ─── Generación de datos sintéticos ────────────────────────────────────────────
 
-def generate_synthetic_data(n_samples: int = 5000, random_state: int = 42) -> pd.DataFrame:
+def generate_synthetic_data(n_samples: int = 10000, random_state: int = 42) -> pd.DataFrame:
     """
-    Genera un dataset sintético con reglas de negocio realistas para
-    simular postulaciones laborales en el contexto colombiano.
+    Genera datos sintéticos con variables que comparan candidato vs oferta.
+    Las reglas de negocio reflejan criterios reales de selección laboral.
     """
     np.random.seed(random_state)
 
-    data = {
-        "tipo_empleo":   np.random.choice(TIPO_EMPLEO, n_samples),
-        "modalidad":     np.random.choice(MODALIDAD, n_samples),
-        "tipo_contrato": np.random.choice(TIPO_CONTRATO, n_samples),
-        "experiencia":   np.random.randint(0, 21, n_samples),          # 0-20 años
-        "nivel_estudio": np.random.choice(NIVEL_ESTUDIO, n_samples),
-        "sector":        np.random.choice(SECTOR, n_samples),
-    }
-    df = pd.DataFrame(data)
+    # ── Datos del candidato ──────────────────────────────────────────────────
+    experiencia_candidato = np.random.randint(0, 21, n_samples)
+    nivel_candidato_idx   = np.random.randint(0, len(NIVEL_ESTUDIO), n_samples)
+    categoria_candidato   = np.random.randint(0, len(CATEGORIAS), n_samples)
 
-    # Mapa de peso por nivel de estudio
-    estudio_peso = {
-        "Sin_estudios": 0, "Bachiller": 1, "Tecnico_Tecnologo": 2,
-        "Tecnologo_Universitario": 3, "Universitario": 4,
-        "Master": 5, "Doctorado": 6
-    }
+    # ── Datos de la oferta ───────────────────────────────────────────────────
+    experiencia_oferta    = np.random.randint(0, 11, n_samples)
+    nivel_oferta_idx      = np.random.randint(0, len(NIVEL_ESTUDIO), n_samples)
+    categoria_oferta      = np.random.randint(0, len(CATEGORIAS), n_samples)
+    habilidades_oferta    = np.random.randint(1, 6, n_samples)   # 1-5 habilidades requeridas
 
-    # Sectores de alta demanda (mayor probabilidad de aceptación)
-    sectores_alta_demanda = {
-        "Tecnologia", "Salud", "Finanzas", "Logistica",
-        "Manufactura", "Educacion", "Energia"
-    }
+    # Habilidades que tiene el candidato de las requeridas (0 a todas)
+    habilidades_comunes   = np.array([
+        np.random.randint(0, habilidades_oferta[i] + 1)
+        for i in range(n_samples)
+    ])
 
-    # Calcular probabilidad de aceptación con reglas de negocio
+    # ── Variables derivadas (lo que la red realmente aprende) ────────────────
+    cumple_experiencia  = (experiencia_candidato >= experiencia_oferta).astype(int)
+    brecha_experiencia  = experiencia_candidato - experiencia_oferta
+    cumple_nivel        = (nivel_candidato_idx >= nivel_oferta_idx).astype(int)
+    match_habilidades   = habilidades_comunes / habilidades_oferta          # 0.0 - 1.0
+    match_categoria     = (categoria_candidato == categoria_oferta).astype(int)
+
+    # ── Calcular probabilidad de aceptación ──────────────────────────────────
     prob = np.zeros(n_samples)
 
-    for i, row in df.iterrows():
-        p = 0.3  # base
+    for i in range(n_samples):
+        p = 0.15  # base mínima
 
-        # Experiencia (mayor experiencia = más probabilidad)
-        p += min(row["experiencia"] / 20, 1.0) * 0.25
+        # Cumplir experiencia mínima es el factor más importante
+        if cumple_experiencia[i]:
+            p += 0.25
+            # Bonus por superar el mínimo con creces
+            extra = min(brecha_experiencia[i] / 10, 1.0)
+            p += extra * 0.10
+        else:
+            # Penalización por no llegar al mínimo
+            deficit = abs(brecha_experiencia[i])
+            p -= min(deficit / 5, 0.15)
 
-        # Nivel de estudio
-        p += (estudio_peso[row["nivel_estudio"]] / 6) * 0.25
+        # Cumplir nivel de estudio requerido
+        if cumple_nivel[i]:
+            p += 0.20
+            # Bonus por superar el nivel requerido
+            brecha_nivel = nivel_candidato_idx[i] - nivel_oferta_idx[i]
+            p += min(brecha_nivel / 6, 1.0) * 0.05
+        else:
+            p -= 0.10
 
-        # Sector de alta demanda
-        if row["sector"] in sectores_alta_demanda:
-            p += 0.10
+        # Match de habilidades — muy influyente
+        p += match_habilidades[i] * 0.25
 
-        # Tipo de empleo (Tiempo completo más solicitado)
-        if row["tipo_empleo"] == "Tiempo_Completo":
-            p += 0.05
+        # Match de categoría profesional
+        if match_categoria[i]:
+            p += 0.15
 
-        # Tipo de contrato (Indefinido más atractivo)
-        if row["tipo_contrato"] == "Indefinido":
-            p += 0.05
+        # Ruido realista
+        prob[i] = np.clip(p + np.random.normal(0, 0.06), 0, 1)
 
-        # Modalidad (Remoto/Híbrido son más atractivos actualmente)
-        if row["modalidad"] in ["Remoto", "Hibrido"]:
-            p += 0.05
-
-        prob[i] = np.clip(p + np.random.normal(0, 0.05), 0, 1)
-
-    df["aceptado"] = (prob > 0.55).astype(int)
+    df = pd.DataFrame({
+        "experiencia_candidato": experiencia_candidato,
+        "cumple_experiencia":    cumple_experiencia,
+        "brecha_experiencia":    brecha_experiencia,
+        "nivel_candidato":       nivel_candidato_idx,
+        "cumple_nivel":          cumple_nivel,
+        "match_habilidades":     match_habilidades,
+        "match_categoria":       match_categoria,
+        "aceptado":              (prob > 0.50).astype(int)
+    })
 
     print(f"✓ Dataset generado: {n_samples} muestras")
-    print(f"  Aceptados:     {df['aceptado'].sum()} ({df['aceptado'].mean()*100:.1f}%)")
-    print(f"  No aceptados:  {(df['aceptado'] == 0).sum()} ({(1 - df['aceptado'].mean())*100:.1f}%)")
+    print(f"  Aceptados:    {df['aceptado'].sum()} ({df['aceptado'].mean()*100:.1f}%)")
+    print(f"  No aceptados: {(df['aceptado']==0).sum()} ({(1-df['aceptado'].mean())*100:.1f}%)")
     return df
 
 
 # ─── Preprocesamiento ───────────────────────────────────────────────────────────
 
 class WorkwisePreprocessor:
-    """Encoders y scaler para las variables del modelo."""
+    """
+    Escala las variables numéricas continuas.
+    Las variables binarias (cumple_*) y match_habilidades ya están en 0-1,
+    por lo que solo escalamos experiencia, brecha y nivel.
+    """
 
     def __init__(self):
-        self.encoders: dict[str, LabelEncoder] = {}
         self.scaler = StandardScaler()
-        self.categorical_cols = ["tipo_empleo", "modalidad", "tipo_contrato", "nivel_estudio", "sector"]
-        self.numeric_cols = ["experiencia"]
+        self.scale_cols  = ["experiencia_candidato", "brecha_experiencia", "nivel_candidato"]
+        self.passthrough = ["cumple_experiencia", "cumple_nivel", "match_habilidades", "match_categoria"]
 
     def fit_transform(self, df: pd.DataFrame) -> np.ndarray:
-        features = self._encode_categoricals(df, fit=True)
-        features = self._scale_numerics(features, df, fit=True)
-        return features
+        scaled = self.scaler.fit_transform(df[self.scale_cols].values)
+        passthrough = df[self.passthrough].values
+        return np.hstack([scaled, passthrough])
 
     def transform(self, df: pd.DataFrame) -> np.ndarray:
-        features = self._encode_categoricals(df, fit=False)
-        features = self._scale_numerics(features, df, fit=False)
-        return features
+        scaled = self.scaler.transform(df[self.scale_cols].values)
+        passthrough = df[self.passthrough].values
+        return np.hstack([scaled, passthrough])
 
-    def _encode_categoricals(self, df: pd.DataFrame, fit: bool) -> pd.DataFrame:
-        result = df.copy()
-        for col in self.categorical_cols:
-            if fit:
-                le = LabelEncoder()
-                result[col] = le.fit_transform(df[col])
-                self.encoders[col] = le
-            else:
-                le = self.encoders[col]
-                result[col] = le.transform(df[col])
-        return result
-
-    def _scale_numerics(self, df: pd.DataFrame, original: pd.DataFrame, fit: bool) -> np.ndarray:
-        numeric_data = original[self.numeric_cols].values
-        if fit:
-            scaled = self.scaler.fit_transform(numeric_data)
-        else:
-            scaled = self.scaler.transform(numeric_data)
-
-        cat_data = df[self.categorical_cols].values
-        return np.hstack([cat_data, scaled])
+    def transform_single(self, row: dict) -> np.ndarray:
+        """Transforma un único registro (para la API)."""
+        df = pd.DataFrame([row])
+        return self.transform(df)
 
     def save(self, directory: str):
         os.makedirs(directory, exist_ok=True)
-        joblib.dump(self.encoders, f"{directory}/encoders.pkl")
-        joblib.dump(self.scaler,   f"{directory}/scaler.pkl")
+        joblib.dump(self.scaler, f"{directory}/scaler.pkl")
         print(f"✓ Preprocesador guardado en '{directory}/'")
 
     def load(self, directory: str):
-        self.encoders = joblib.load(f"{directory}/encoders.pkl")
-        self.scaler   = joblib.load(f"{directory}/scaler.pkl")
+        self.scaler = joblib.load(f"{directory}/scaler.pkl")
         print(f"✓ Preprocesador cargado desde '{directory}/'")
 
 
@@ -172,24 +176,25 @@ class WorkwisePreprocessor:
 def build_model(input_dim: int) -> keras.Model:
     """
     Red neuronal para clasificación binaria.
-    Arquitectura: 6 entradas → 128 → 64 → 32 → 1 salida (sigmoide)
+    Arquitectura: 7 entradas → 64 → 32 → 16 → 1 (sigmoide)
+    Más simple que v1 porque las variables ya son semánticas (no categóricas crudas).
     """
     model = keras.Sequential([
         layers.Input(shape=(input_dim,)),
-
-        layers.Dense(128, activation="relu"),
-        layers.BatchNormalization(),
-        layers.Dropout(0.3),
 
         layers.Dense(64, activation="relu"),
         layers.BatchNormalization(),
         layers.Dropout(0.2),
 
         layers.Dense(32, activation="relu"),
+        layers.BatchNormalization(),
+        layers.Dropout(0.15),
+
+        layers.Dense(16, activation="relu"),
         layers.Dropout(0.1),
 
         layers.Dense(1, activation="sigmoid")
-    ], name="workwise_predictor")
+    ], name="workwise_predictor_v2")
 
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
@@ -202,26 +207,29 @@ def build_model(input_dim: int) -> keras.Model:
 # ─── Entrenamiento ──────────────────────────────────────────────────────────────
 
 def train():
-    print("\n══════════════════════════════════════════")
-    print("   WORKWISE — Entrenamiento del Modelo")
-    print("══════════════════════════════════════════\n")
+    print("\n══════════════════════════════════════════════")
+    print("   WORKWISE v2 — Entrenamiento del Modelo")
+    print("══════════════════════════════════════════════\n")
 
     # 1. Generar datos
-    df = generate_synthetic_data(n_samples=8000)
+    df = generate_synthetic_data(n_samples=10000)
 
     # 2. Preprocesar
+    feature_cols = [
+        "experiencia_candidato", "cumple_experiencia", "brecha_experiencia",
+        "nivel_candidato", "cumple_nivel", "match_habilidades", "match_categoria"
+    ]
     preprocessor = WorkwisePreprocessor()
-    X = preprocessor.fit_transform(df.drop(columns=["aceptado"]))
+    X = preprocessor.fit_transform(df[feature_cols])
     y = df["aceptado"].values
 
     # 3. Split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
+    print(f"✓ Train: {len(X_train)} | Test: {len(X_test)}")
 
-    print(f"\n✓ Train: {len(X_train)} | Test: {len(X_test)}")
-
-    # 4. Construir modelo
+    # 4. Modelo
     model = build_model(input_dim=X.shape[1])
     model.summary()
 
@@ -237,12 +245,9 @@ def train():
         )
     ]
 
-    print("Pesos totales ANTES:", model.count_params())
-    print("Cantidad de arrays de pesos ANTES:", len(model.get_weights()))
-
     # 6. Entrenar
     print("\n▶ Entrenando...\n")
-    history = model.fit(
+    model.fit(
         X_train, y_train,
         epochs=100,
         batch_size=64,
@@ -250,13 +255,11 @@ def train():
         callbacks=callbacks,
         verbose=1
     )
-    print("Pesos totales DESPUÉS:", model.count_params())
-    print("Cantidad de arrays de pesos DESPUÉS:", len(model.get_weights()))
-    print("Shape primer peso DESPUÉS:", model.get_weights()[0].shape)
+
     # 7. Evaluar
-    print("\n── Evaluación en Test ──────────────────────")
+    print("\n── Evaluación en Test ──────────────────────────")
     y_pred_prob = model.predict(X_test).flatten()
-    y_pred = (y_pred_prob > 0.5).astype(int)
+    y_pred      = (y_pred_prob > 0.5).astype(int)
 
     print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
     print("\nReporte de clasificación:")
@@ -269,26 +272,20 @@ def train():
     model.save(f"{MODEL_DIR}/model.h5", include_optimizer=False)
     preprocessor.save(MODEL_DIR)
 
-    # Guardar metadatos
     metadata = {
-        "input_features": ["tipo_empleo", "modalidad", "tipo_contrato",
-                            "nivel_estudio", "sector", "experiencia"],
-        "output": "aceptado (0 = No, 1 = Sí)",
+        "version": "2.0",
+        "input_features": feature_cols,
+        "output": "aceptado (0 = No, 1 = Si)",
         "threshold": 0.5,
         "accuracy_test": round(float(accuracy_score(y_test, y_pred)), 4),
-        "categoricals": {
-            "tipo_empleo":   TIPO_EMPLEO,
-            "modalidad":     MODALIDAD,
-            "tipo_contrato": TIPO_CONTRATO,
-            "nivel_estudio": NIVEL_ESTUDIO,
-            "sector":        SECTOR
-        }
+        "nivel_estudio_map": NIVEL_PESO,
+        "categorias": CATEGORIAS
     }
     with open(f"{MODEL_DIR}/metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-    print(f"\n✓ Modelo guardado en '{MODEL_DIR}/'")
-    print("══════════════════════════════════════════\n")
+    print(f"\n✓ Modelo v2 guardado en '{MODEL_DIR}/'")
+    print("══════════════════════════════════════════════\n")
 
 
 if __name__ == "__main__":
