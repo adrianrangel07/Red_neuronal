@@ -1,18 +1,19 @@
 {
-  "version": "2.0",
+  "version": "3.0",
   "input_features": [
+    "habilidades_oferta",
+    "habilidades_match",
+    "experiencia_oferta",
     "experiencia_candidato",
-    "cumple_experiencia",
-    "brecha_experiencia",
+    "nivel_oferta",
     "nivel_candidato",
-    "cumple_nivel",
-    "match_habilidades",
-    "match_categoria"
+    "sector_oferta",
+    "sector_candidato"
   ],
-  "output": "aceptado (0 = No, 1 = Si)",
+  "output": "aceptado (0=No, 1=Si)",
   "threshold": 0.5,
-  "accuracy_test": 0.9425,
-  "nivel_estudio_map": {
+  "accuracy_test": 0.9371,
+  "nivel_peso": {
     "Sin_estudios": 0,
     "Bachiller": 1,
     "Tecnico_Tecnologo": 2,
@@ -21,14 +22,17 @@
     "Master": 5,
     "Doctorado": 6
   },
-  "categorias": [
-    "Ingenieria",
-    "Desarrollo",
-    "Salud",
-    "Administracion",
-    "Diseno",
-    "Otros",
-    "Tecnologia",
-    "Construccion"
-  ]
+  "sector_peso": {
+    "Tecnología": 0,
+    "Salud": 1,
+    "Educación": 2,
+    "Finanzas": 3,
+    "Construcción": 4,
+    "Marketing": 5,
+    "Logística": 6,
+    "E-commerce": 7,
+    "Turismo": 8,
+    "Industria": 9,
+    "Otro": 10
+  }
 }
