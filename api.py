@@ -1,16 +1,17 @@
 """
-Workwise - API REST v2
-Recibe variables ya calculadas desde Spring Boot y devuelve la predicción.
+Workwise - API REST v3
+Recibe las 8 variables cuantitativas desde Spring Boot y devuelve la predicción.
 
 POST /predict
 {
-  "experiencia_candidato": 3,
-  "cumple_experiencia":    1,
-  "brecha_experiencia":    1,
+  "habilidades_oferta":    6,
+  "habilidades_match":     3,
+  "experiencia_oferta":    2,
+  "experiencia_candidato": 4,
+  "nivel_oferta":          4,
   "nivel_candidato":       4,
-  "cumple_nivel":          1,
-  "match_habilidades":     0.75,
-  "match_categoria":       1
+  "sector_oferta":         0,
+  "sector_candidato":      0
 }
 """
 
@@ -26,10 +27,22 @@ import os
 
 MODEL_DIR = "saved_model"
 
+# Orden exacto en que el scaler fue entrenado
+SCALE_COLS = [
+    "habilidades_oferta",
+    "habilidades_match",
+    "experiencia_oferta",
+    "experiencia_candidato",
+    "nivel_oferta",
+    "nivel_candidato",
+    "sector_oferta",
+    "sector_candidato",
+]
+
 app = FastAPI(
-    title="Workwise ML API v2",
-    description="Predice aceptación laboral comparando candidato vs oferta.",
-    version="2.0.0"
+    title="Workwise ML API v3",
+    description="Predicción de compatibilidad laboral con 8 variables cuantitativas.",
+    version="3.0.0",
 )
 
 app.add_middleware(
@@ -39,42 +52,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model      = None
-preprocessor_scaler = None
-metadata   = None
-
-# Columnas en el orden exacto que espera el modelo
-SCALE_COLS      = ["experiencia_candidato", "brecha_experiencia", "nivel_candidato"]
-PASSTHROUGH_COLS = ["cumple_experiencia", "cumple_nivel", "match_habilidades", "match_categoria"]
+model  = None
+scaler = None
+meta   = None
 
 
 @app.on_event("startup")
 def load_model():
-    global model, preprocessor_scaler, metadata
+    global model, scaler, meta
 
     if not os.path.exists(MODEL_DIR):
         print(f"⚠ Directorio '{MODEL_DIR}' no encontrado. Ejecuta model.py primero.")
         return
 
-    model               = keras.models.load_model(f"{MODEL_DIR}/model.h5")
-    preprocessor_scaler = joblib.load(f"{MODEL_DIR}/scaler.pkl")
+    model  = keras.models.load_model(f"{MODEL_DIR}/model.h5")
+    scaler = joblib.load(f"{MODEL_DIR}/scaler.pkl")
 
     with open(f"{MODEL_DIR}/metadata.json", "r", encoding="utf-8") as f:
-        metadata = json.load(f)
+        meta = json.load(f)
 
-    print("✓ Modelo v2 cargado correctamente.")
+    print("✓ Modelo v3 cargado correctamente.")
 
 
-# ─── Schema ──────────────────────────────────────────────────────────────────
+# ─── Schemas ──────────────────────────────────────────────────────────────────
 
 class PrediccionInput(BaseModel):
-    experiencia_candidato: int   = Field(..., ge=0, le=50, example=3)
-    cumple_experiencia:    int   = Field(..., ge=0, le=1,  example=1)
-    brecha_experiencia:    int   = Field(..., example=1)
-    nivel_candidato:       int   = Field(..., ge=0, le=6,  example=4)
-    cumple_nivel:          int   = Field(..., ge=0, le=1,  example=1)
-    match_habilidades:     float = Field(..., ge=0.0, le=1.0, example=0.75)
-    match_categoria:       int   = Field(..., ge=0, le=1,  example=1)
+    habilidades_oferta:    int   = Field(..., ge=0,   le=20,  example=6)
+    habilidades_match:     int   = Field(..., ge=0,   le=20,  example=3)
+    experiencia_oferta:    int   = Field(..., ge=0,   le=30,  example=2)
+    experiencia_candidato: int   = Field(..., ge=0,   le=50,  example=4)
+    nivel_oferta:          int   = Field(..., ge=0,   le=6,   example=4)
+    nivel_candidato:       int   = Field(..., ge=0,   le=6,   example=4)
+    sector_oferta:         int   = Field(..., ge=0,   le=20,  example=0)
+    sector_candidato:      int   = Field(..., ge=0,   le=20,  example=0)
 
 
 class PrediccionResponse(BaseModel):
@@ -82,16 +92,14 @@ class PrediccionResponse(BaseModel):
     probabilidad: float
     confianza:    str
     mensaje:      str
-    detalle: dict   # desglose para que Spring Boot lo muestre si quiere
+    detalle:      dict
 
 
-# ─── Lógica ───────────────────────────────────────────────────────────────────
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _preprocess(data: dict) -> np.ndarray:
-    df     = pd.DataFrame([data])
-    scaled = preprocessor_scaler.transform(df[SCALE_COLS].values)
-    passthrough = df[PASSTHROUGH_COLS].values
-    return np.hstack([scaled, passthrough])
+    df = pd.DataFrame([data])
+    return scaler.transform(df[SCALE_COLS].values)
 
 
 def _confianza(prob: float) -> str:
@@ -106,7 +114,7 @@ def _confianza(prob: float) -> str:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_loaded": model is not None, "version": "2.0"}
+    return {"status": "ok", "model_loaded": model is not None, "version": "3.0"}
 
 
 @app.post("/predict", response_model=PrediccionResponse)
@@ -114,10 +122,22 @@ def predict(data: PrediccionInput):
     if model is None:
         raise HTTPException(status_code=503, detail="Modelo no disponible.")
 
+    # Validación de negocio: habilidades_match no puede superar habilidades_oferta
+    if data.habilidades_match > data.habilidades_oferta:
+        raise HTTPException(
+            status_code=422,
+            detail="habilidades_match no puede ser mayor que habilidades_oferta."
+        )
+
     try:
         X    = _preprocess(data.model_dump())
         prob = float(model.predict(X, verbose=0)[0][0])
         aceptado = prob >= 0.5
+
+        # Detalle legible para el frontend
+        hab_oferta = data.habilidades_oferta
+        hab_match  = data.habilidades_match
+        pct_hab    = round((hab_match / hab_oferta * 100) if hab_oferta > 0 else 0)
 
         return PrediccionResponse(
             aceptado=aceptado,
@@ -129,11 +149,14 @@ def predict(data: PrediccionInput):
                 "El candidato tiene baja compatibilidad con esta oferta."
             ),
             detalle={
-                "cumple_experiencia": bool(data.cumple_experiencia),
-                "cumple_nivel_estudio": bool(data.cumple_nivel),
-                "match_habilidades_pct": round(data.match_habilidades * 100),
-                "match_categoria": bool(data.match_categoria),
-            }
+                "habilidades_oferta":      hab_oferta,
+                "habilidades_match":       hab_match,
+                "habilidades_pct":         pct_hab,
+                "cumple_experiencia":      data.experiencia_candidato >= data.experiencia_oferta,
+                "brecha_experiencia":      data.experiencia_candidato - data.experiencia_oferta,
+                "cumple_nivel":            data.nivel_candidato >= data.nivel_oferta,
+                "match_sector":            data.sector_candidato == data.sector_oferta,
+            },
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en predicción: {str(e)}")

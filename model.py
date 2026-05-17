@@ -1,20 +1,24 @@
 """
-Workwise - Red Neuronal de Predicción de Aceptación Laboral v2
+Workwise - Red Neuronal de Predicción de Aceptación Laboral v3
 Modelo: Clasificación binaria (Aceptado / No Aceptado)
 
-Variables de entrada (7):
-  1. experiencia_candidato     → años que ingresa el usuario
-  2. cumple_experiencia        → 1 si experiencia_candidato >= experiencia_oferta
-  3. brecha_experiencia        → experiencia_candidato - experiencia_oferta (puede ser negativa)
-  4. nivel_estudio_candidato   → nivel que selecciona el usuario (codificado)
-  5. cumple_nivel              → 1 si nivel_candidato >= nivel_oferta
-  6. match_habilidades         → % de habilidades de la oferta que tiene el candidato (0.0-1.0)
-  7. match_categoria           → 1 si la categoría del candidato coincide con la de la oferta
+Variables de entrada (8) — todas cuantitativas/numéricas:
+  1. habilidades_oferta     → cuántas habilidades pide la oferta (entero)
+  2. habilidades_match      → cuántas de esas tiene el candidato (entero)
+  3. experiencia_oferta     → años mínimos requeridos por la oferta
+  4. experiencia_candidato  → años del candidato (formulario)
+  5. nivel_oferta           → nivel educativo requerido (0-6)
+  6. nivel_candidato        → nivel educativo del candidato (0-6, formulario)
+  7. sector_oferta          → sector de la oferta (codificado 0-N)
+  8. sector_candidato       → sector del candidato (formulario, codificado 0-N)
+
+La red aprende por sí sola cuánto pesa cada diferencia.
+No se calculan ratios ni variables derivadas antes de pasar al modelo.
 """
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from tensorflow import keras
@@ -26,104 +30,112 @@ import os
 # ─── Constantes ────────────────────────────────────────────────────────────────
 
 NIVEL_ESTUDIO = [
-    "Sin_estudios",           # 0 — menor nivel
-    "Bachiller",              # 1
-    "Tecnico_Tecnologo",      # 2
-    "Tecnologo_Universitario",# 3
-    "Universitario",          # 4
-    "Master",                 # 5
-    "Doctorado"               # 6 — mayor nivel
+    "Sin_estudios",            # 0
+    "Bachiller",               # 1
+    "Tecnico_Tecnologo",       # 2
+    "Tecnologo_Universitario", # 3
+    "Universitario",           # 4
+    "Master",                  # 5
+    "Doctorado",               # 6
 ]
-
-# Mapa numérico para comparar niveles
 NIVEL_PESO = {n: i for i, n in enumerate(NIVEL_ESTUDIO)}
 
-CATEGORIAS = [
-    "Ingenieria", "Desarrollo", "Salud", "Administracion",
-    "Diseno", "Otros", "Tecnologia", "Construccion"
+# Sectores — deben coincidir con los valores reales que llegan desde Spring Boot
+SECTORES = [
+    "Tecnología",      # 0
+    "Salud",           # 1
+    "Educación",       # 2
+    "Finanzas",        # 3
+    "Construcción",    # 4
+    "Marketing",       # 5
+    "Logística",       # 6
+    "E-commerce",      # 7
+    "Turismo",         # 8
+    "Industria",       # 9
+    "Otro",            # 10
 ]
+SECTOR_PESO = {s: i for i, s in enumerate(SECTORES)}
+N_SECTORES  = len(SECTORES)
 
 MODEL_DIR = "saved_model"
+
+# Columnas que se escalan con StandardScaler
+SCALE_COLS = [
+    "habilidades_oferta",
+    "habilidades_match",
+    "experiencia_oferta",
+    "experiencia_candidato",
+    "nivel_oferta",
+    "nivel_candidato",
+    "sector_oferta",
+    "sector_candidato",
+]
 
 
 # ─── Generación de datos sintéticos ────────────────────────────────────────────
 
-def generate_synthetic_data(n_samples: int = 10000, random_state: int = 42) -> pd.DataFrame:
-    """
-    Genera datos sintéticos con variables que comparan candidato vs oferta.
-    Las reglas de negocio reflejan criterios reales de selección laboral.
-    """
+def generate_synthetic_data(n_samples: int = 12000, random_state: int = 42) -> pd.DataFrame:
     np.random.seed(random_state)
 
-    # ── Datos del candidato ──────────────────────────────────────────────────
-    experiencia_candidato = np.random.randint(0, 21, n_samples)
-    nivel_candidato_idx   = np.random.randint(0, len(NIVEL_ESTUDIO), n_samples)
-    categoria_candidato   = np.random.randint(0, len(CATEGORIAS), n_samples)
+    # ── Oferta ───────────────────────────────────────────────────────────────
+    habilidades_oferta    = np.random.randint(1, 8, n_samples)      # 1-7 habilidades
+    experiencia_oferta    = np.random.randint(0, 11, n_samples)     # 0-10 años
+    nivel_oferta          = np.random.randint(0, 7,  n_samples)     # 0-6
+    sector_oferta         = np.random.randint(0, N_SECTORES, n_samples)
 
-    # ── Datos de la oferta ───────────────────────────────────────────────────
-    experiencia_oferta    = np.random.randint(0, 11, n_samples)
-    nivel_oferta_idx      = np.random.randint(0, len(NIVEL_ESTUDIO), n_samples)
-    categoria_oferta      = np.random.randint(0, len(CATEGORIAS), n_samples)
-    habilidades_oferta    = np.random.randint(1, 6, n_samples)   # 1-5 habilidades requeridas
-
-    # Habilidades que tiene el candidato de las requeridas (0 a todas)
-    habilidades_comunes   = np.array([
+    # ── Candidato ────────────────────────────────────────────────────────────
+    # habilidades_match: entre 0 y lo que pide la oferta
+    habilidades_match     = np.array([
         np.random.randint(0, habilidades_oferta[i] + 1)
         for i in range(n_samples)
     ])
+    experiencia_candidato = np.random.randint(0, 21, n_samples)     # 0-20 años
+    nivel_candidato       = np.random.randint(0, 7,  n_samples)     # 0-6
+    sector_candidato      = np.random.randint(0, N_SECTORES, n_samples)
 
-    # ── Variables derivadas (lo que la red realmente aprende) ────────────────
-    cumple_experiencia  = (experiencia_candidato >= experiencia_oferta).astype(int)
-    brecha_experiencia  = experiencia_candidato - experiencia_oferta
-    cumple_nivel        = (nivel_candidato_idx >= nivel_oferta_idx).astype(int)
-    match_habilidades   = habilidades_comunes / habilidades_oferta          # 0.0 - 1.0
-    match_categoria     = (categoria_candidato == categoria_oferta).astype(int)
-
-    # ── Calcular probabilidad de aceptación ──────────────────────────────────
+    # ── Probabilidad de aceptación (reglas de negocio) ────────────────────────
     prob = np.zeros(n_samples)
-
     for i in range(n_samples):
-        p = 0.15  # base mínima
+        p = 0.10  # base mínima
 
-        # Cumplir experiencia mínima es el factor más importante
-        if cumple_experiencia[i]:
-            p += 0.25
-            # Bonus por superar el mínimo con creces
-            extra = min(brecha_experiencia[i] / 10, 1.0)
-            p += extra * 0.10
+        # --- Habilidades: ratio de coincidencia ponderado ---
+        ratio_hab = habilidades_match[i] / habilidades_oferta[i]
+        p += ratio_hab * 0.30          # hasta +0.30 si tiene todas
+
+        # --- Experiencia ---
+        if experiencia_candidato[i] >= experiencia_oferta[i]:
+            p += 0.22
+            exceso = min((experiencia_candidato[i] - experiencia_oferta[i]) / 10, 1.0)
+            p += exceso * 0.08         # bonus por superar el mínimo
         else:
-            # Penalización por no llegar al mínimo
-            deficit = abs(brecha_experiencia[i])
-            p -= min(deficit / 5, 0.15)
+            deficit = experiencia_oferta[i] - experiencia_candidato[i]
+            p -= min(deficit / 5, 0.18)
 
-        # Cumplir nivel de estudio requerido
-        if cumple_nivel[i]:
-            p += 0.20
-            # Bonus por superar el nivel requerido
-            brecha_nivel = nivel_candidato_idx[i] - nivel_oferta_idx[i]
+        # --- Nivel educativo ---
+        if nivel_candidato[i] >= nivel_oferta[i]:
+            p += 0.18
+            brecha_nivel = nivel_candidato[i] - nivel_oferta[i]
             p += min(brecha_nivel / 6, 1.0) * 0.05
         else:
             p -= 0.10
 
-        # Match de habilidades — muy influyente
-        p += match_habilidades[i] * 0.25
+        # --- Sector ---
+        if sector_candidato[i] == sector_oferta[i]:
+            p += 0.12
 
-        # Match de categoría profesional
-        if match_categoria[i]:
-            p += 0.15
-
-        # Ruido realista
-        prob[i] = np.clip(p + np.random.normal(0, 0.06), 0, 1)
+        # Ruido
+        prob[i] = float(np.clip(p + np.random.normal(0, 0.06), 0.0, 1.0))
 
     df = pd.DataFrame({
+        "habilidades_oferta":    habilidades_oferta,
+        "habilidades_match":     habilidades_match,
+        "experiencia_oferta":    experiencia_oferta,
         "experiencia_candidato": experiencia_candidato,
-        "cumple_experiencia":    cumple_experiencia,
-        "brecha_experiencia":    brecha_experiencia,
-        "nivel_candidato":       nivel_candidato_idx,
-        "cumple_nivel":          cumple_nivel,
-        "match_habilidades":     match_habilidades,
-        "match_categoria":       match_categoria,
-        "aceptado":              (prob > 0.50).astype(int)
+        "nivel_oferta":          nivel_oferta,
+        "nivel_candidato":       nivel_candidato,
+        "sector_oferta":         sector_oferta,
+        "sector_candidato":      sector_candidato,
+        "aceptado":              (prob > 0.50).astype(int),
     })
 
     print(f"✓ Dataset generado: {n_samples} muestras")
@@ -132,34 +144,17 @@ def generate_synthetic_data(n_samples: int = 10000, random_state: int = 42) -> p
     return df
 
 
-# ─── Preprocesamiento ───────────────────────────────────────────────────────────
+# ─── Preprocesador ─────────────────────────────────────────────────────────────
 
 class WorkwisePreprocessor:
-    """
-    Escala las variables numéricas continuas.
-    Las variables binarias (cumple_*) y match_habilidades ya están en 0-1,
-    por lo que solo escalamos experiencia, brecha y nivel.
-    """
-
     def __init__(self):
         self.scaler = StandardScaler()
-        self.scale_cols  = ["experiencia_candidato", "brecha_experiencia", "nivel_candidato"]
-        self.passthrough = ["cumple_experiencia", "cumple_nivel", "match_habilidades", "match_categoria"]
 
     def fit_transform(self, df: pd.DataFrame) -> np.ndarray:
-        scaled = self.scaler.fit_transform(df[self.scale_cols].values)
-        passthrough = df[self.passthrough].values
-        return np.hstack([scaled, passthrough])
+        return self.scaler.fit_transform(df[SCALE_COLS].values)
 
     def transform(self, df: pd.DataFrame) -> np.ndarray:
-        scaled = self.scaler.transform(df[self.scale_cols].values)
-        passthrough = df[self.passthrough].values
-        return np.hstack([scaled, passthrough])
-
-    def transform_single(self, row: dict) -> np.ndarray:
-        """Transforma un único registro (para la API)."""
-        df = pd.DataFrame([row])
-        return self.transform(df)
+        return self.scaler.transform(df[SCALE_COLS].values)
 
     def save(self, directory: str):
         os.makedirs(directory, exist_ok=True)
@@ -175,9 +170,7 @@ class WorkwisePreprocessor:
 
 def build_model(input_dim: int) -> keras.Model:
     """
-    Red neuronal para clasificación binaria.
-    Arquitectura: 7 entradas → 64 → 32 → 16 → 1 (sigmoide)
-    Más simple que v1 porque las variables ya son semánticas (no categóricas crudas).
+    8 entradas → 64 → 32 → 16 → 1 (sigmoid)
     """
     model = keras.Sequential([
         layers.Input(shape=(input_dim,)),
@@ -193,13 +186,13 @@ def build_model(input_dim: int) -> keras.Model:
         layers.Dense(16, activation="relu"),
         layers.Dropout(0.1),
 
-        layers.Dense(1, activation="sigmoid")
-    ], name="workwise_predictor_v2")
+        layers.Dense(1, activation="sigmoid"),
+    ], name="workwise_predictor_v3")
 
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
         loss="binary_crossentropy",
-        metrics=["accuracy", keras.metrics.AUC(name="auc")]
+        metrics=["accuracy", keras.metrics.AUC(name="auc")],
     )
     return model
 
@@ -208,44 +201,34 @@ def build_model(input_dim: int) -> keras.Model:
 
 def train():
     print("\n══════════════════════════════════════════════")
-    print("   WORKWISE v2 — Entrenamiento del Modelo")
+    print("   WORKWISE v3 — Entrenamiento del Modelo")
     print("══════════════════════════════════════════════\n")
 
-    # 1. Generar datos
-    df = generate_synthetic_data(n_samples=10000)
+    df = generate_synthetic_data(n_samples=12000)
 
-    # 2. Preprocesar
-    feature_cols = [
-        "experiencia_candidato", "cumple_experiencia", "brecha_experiencia",
-        "nivel_candidato", "cumple_nivel", "match_habilidades", "match_categoria"
-    ]
     preprocessor = WorkwisePreprocessor()
-    X = preprocessor.fit_transform(df[feature_cols])
+    X = preprocessor.fit_transform(df[SCALE_COLS])
     y = df["aceptado"].values
 
-    # 3. Split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     print(f"✓ Train: {len(X_train)} | Test: {len(X_test)}")
 
-    # 4. Modelo
     model = build_model(input_dim=X.shape[1])
     model.summary()
 
-    # 5. Callbacks
     callbacks = [
         keras.callbacks.EarlyStopping(
             monitor="val_loss", patience=10,
-            restore_best_weights=True, verbose=1
+            restore_best_weights=True, verbose=1,
         ),
         keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss", factor=0.5,
-            patience=5, min_lr=1e-6, verbose=1
-        )
+            patience=5, min_lr=1e-6, verbose=1,
+        ),
     ]
 
-    # 6. Entrenar
     print("\n▶ Entrenando...\n")
     model.fit(
         X_train, y_train,
@@ -253,38 +236,35 @@ def train():
         batch_size=64,
         validation_split=0.15,
         callbacks=callbacks,
-        verbose=1
+        verbose=1,
     )
 
-    # 7. Evaluar
     print("\n── Evaluación en Test ──────────────────────────")
     y_pred_prob = model.predict(X_test).flatten()
     y_pred      = (y_pred_prob > 0.5).astype(int)
 
-    print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
-    print("\nReporte de clasificación:")
+    acc = accuracy_score(y_test, y_pred)
+    print(f"Accuracy: {acc:.4f}")
     print(classification_report(y_test, y_pred, target_names=["No Aceptado", "Aceptado"]))
-    print("Matriz de confusión:")
     print(confusion_matrix(y_test, y_pred))
 
-    # 8. Guardar
     os.makedirs(MODEL_DIR, exist_ok=True)
     model.save(f"{MODEL_DIR}/model.h5", include_optimizer=False)
     preprocessor.save(MODEL_DIR)
 
     metadata = {
-        "version": "2.0",
-        "input_features": feature_cols,
-        "output": "aceptado (0 = No, 1 = Si)",
-        "threshold": 0.5,
-        "accuracy_test": round(float(accuracy_score(y_test, y_pred)), 4),
-        "nivel_estudio_map": NIVEL_PESO,
-        "categorias": CATEGORIAS
+        "version":        "3.0",
+        "input_features": SCALE_COLS,
+        "output":         "aceptado (0=No, 1=Si)",
+        "threshold":      0.5,
+        "accuracy_test":  round(float(acc), 4),
+        "nivel_peso":     NIVEL_PESO,
+        "sector_peso":    SECTOR_PESO,
     }
     with open(f"{MODEL_DIR}/metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-    print(f"\n✓ Modelo v2 guardado en '{MODEL_DIR}/'")
+    print(f"\n✓ Modelo v3 guardado en '{MODEL_DIR}/'")
     print("══════════════════════════════════════════════\n")
 
 
