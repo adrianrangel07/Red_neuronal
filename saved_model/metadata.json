@@ -12,7 +12,7 @@
   ],
   "output": "aceptado (0=No, 1=Si)",
   "threshold": 0.5,
-  "accuracy_test": 0.9371,
+  "accuracy_test": 0.935,
   "nivel_peso": {
     "Sin_estudios": 0,
     "Bachiller": 1,
@@ -23,16 +23,17 @@
     "Doctorado": 6
   },
   "sector_peso": {
-    "Tecnología": 0,
+    "Tecnologia": 0,
     "Salud": 1,
-    "Educación": 2,
+    "Educacion": 2,
     "Finanzas": 3,
-    "Construcción": 4,
+    "Construccion": 4,
     "Marketing": 5,
-    "Logística": 6,
-    "E-commerce": 7,
+    "Logistica": 6,
+    "Ecommerce": 7,
     "Turismo": 8,
     "Industria": 9,
-    "Otro": 10
+    "Agricultura": 10,
+    "Otros": 11
   }
 }

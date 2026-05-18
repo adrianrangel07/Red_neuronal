@@ -41,18 +41,20 @@ NIVEL_ESTUDIO = [
 NIVEL_PESO = {n: i for i, n in enumerate(NIVEL_ESTUDIO)}
 
 # Sectores — deben coincidir con los valores reales que llegan desde Spring Boot
+# Índices deben coincidir con CATEGORIA_IDX en PrediccionController.java
 SECTORES = [
-    "Tecnología",      # 0
-    "Salud",           # 1
-    "Educación",       # 2
-    "Finanzas",        # 3
-    "Construcción",    # 4
-    "Marketing",       # 5
-    "Logística",       # 6
-    "E-commerce",      # 7
-    "Turismo",         # 8
-    "Industria",       # 9
-    "Otro",            # 10
+    "Tecnologia",   # 0  ← cubre sector "Tecnología" y categoría "Desarrollo"
+    "Salud",        # 1
+    "Educacion",    # 2
+    "Finanzas",     # 3  ← cubre también categoría "Administración"
+    "Construccion", # 4  ← cubre también categoría "Ingeniería"
+    "Marketing",    # 5  ← cubre también categoría "Diseño"
+    "Logistica",    # 6
+    "Ecommerce",    # 7
+    "Turismo",      # 8  ← cubre también categoría "Gastronomía y Turismo"
+    "Industria",    # 9
+    "Agricultura",  # 10
+    "Otros",        # 11
 ]
 SECTOR_PESO = {s: i for i, s in enumerate(SECTORES)}
 N_SECTORES  = len(SECTORES)
